@@ -7,10 +7,7 @@ st.set_page_config(page_title="知识内化助手", layout="centered")
 # 侧边栏：配置 API Key
 with st.sidebar:
     st.title("⚙️ 设置")
-    # 方案：你可以在这里粘贴 Key，或者将下面的字符串换成你的 Key
-    api_key_input = st.text_input("粘贴你的 Gemini API Key", type="password")
-    # 如果你想省事，可以直接写死在这里：
-    # api_key_input = "你的那串AIza代码"
+    api_key_input = "AIzaSyAaA3gvPJMHb_DKk4Dew7Jj9PwrU0hBlcM"
     st.info("分类标签：AI应用 | 跳舞 | 职场英语")
 
 st.title("🧠 碎片知识内化系统")
