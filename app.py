@@ -23,21 +23,19 @@ def connect_to_sheet():
 # --- 2. 侧边栏 ---
 with st.sidebar:
     st.title("⚙️ 设置")
-    # 🌟 建议在这里手动输入，或者留空从 Secrets 读取
-    api_key_input = st.text_input("粘贴新的 Gemini API Key", type="password")
-    st.success("✅ 深度洞察模式")
-    st.info("Eagle Analytical 专属版")
+    api_key_input = st.text_input("粘贴新的 Gemini Key", type="password")
+    st.info("当前可用模型：Gemini 3 Flash Preview")
 
-st.title("🧠 深度知识内化系统")
-st.caption("左侧深度思考 | 右侧原子执行 (ADHD 友好)")
+st.title("🧠 碎片知识内化系统")
+st.caption("深度专家分析 + 原子级任务拆解 (仅限清单)")
 
 # --- 3. 录入阶段 ---
 st.header("1. 录入内容", divider="blue")
-content = st.text_area("请从小红书或网页复制内容粘贴到这里：", height=150)
+content = st.text_area("请从小红书复制文案粘贴到这里：", height=150)
 
-if st.button("✨ 启动深度解析"):
+if st.button("✨ 让 AI 深度解析"):
     if not api_key_input:
-        st.error("请先输入新的 API Key！旧的已被 Google 封禁。")
+        st.error("请先输入 API Key！")
     elif not content:
         st.warning("内容为空")
     else:
@@ -45,45 +43,40 @@ if st.button("✨ 启动深度解析"):
             genai.configure(api_key=api_key_input)
             model = genai.GenerativeModel('models/gemini-3-flash-preview')
             
-            # 分隔式 Prompt，确保深度与琐碎任务分离
+            # 🌟 严格限制：只有清单部分才使用原子化设定 🌟
             prompt = f"""
-            你是一个顶级知识管理专家，擅长为 ADHD 患者设计极简执行路径。
-            请对以下内容进行深度解析，并严格按照格式输出。
+            你是一个高级知识整理专家。请针对以下内容进行深度解析，严格遵守以下结构：
 
-            【第一部分：深度分析】
-            1. **自动分类**：从[英语学习, 舞蹈练习, 为人处事/职场, 专业知识, AI/编程, 视频/摄影]中选一个。
-            2. **核心逻辑总结**：提炼 3 点底层逻辑，文字精炼且有深度。
-            3. **💡 专业实操建议**：提供一个能优化流程或思维的专家级建议。
+            【第一部分：深度解析】
+            1. 自动分类：必须从 [英语学习, 舞蹈练习, 为人处事/职场, 专业知识, AI/编程, 视频/摄影] 中选一个。
+            2. 提炼核心知识点大纲（采用结构化列表，保持深度与专业性）。
+            3. 提供一个基于你专家角色的专业实操建议（深度的逻辑启发）。
 
-            ---ACTION_START---
-            1. 练习步骤一（原子级，1分钟内可开始）
-            2. 练习步骤二（原子级）
-            3. 练习步骤三（原子级）
-            4. 练习步骤四（原子级）
-            ---ACTION_END---
-            
+            【第二部分：任务拆解】
+            请将上述建议拆解为 3-5 条针对 ADHD 友好的原子级 Action Items。
+            规则：每一步必须极其简单（例如：不要说“练习发音”，要说“对着镜子朗读文中第一句话 3 遍”），确保没有任何启动阻力。
+            格式：请将任务放在 ---ACTION_START--- 和 ---ACTION_END--- 标记之间，每行一个任务。
+
             内容如下：
             {content}
             """
             
-            with st.spinner("Gemini 正在提取深度逻辑..."):
+            with st.spinner("正在调用 Gemini 进行深度思考..."):
                 full_response = model.generate_content(prompt).text
                 
-                # 分割内容
-                main_analysis = full_response.split("---ACTION_START---")[0].strip()
+                # 分割内容：正文保持专业，任务清单进入 Data Editor
+                main_analysis = full_response.split("【第二部分：任务拆解】")[0].strip()
                 action_part = re.search(r"---ACTION_START---(.*)---ACTION_END---", full_response, re.DOTALL)
                 
                 st.session_state.temp_res = main_analysis
                 st.session_state.raw_source = content 
                 
-                # 智能分类标记
-                if "英语" in main_analysis: st.session_state.temp_tag = "英语学习"
-                elif "跳舞" in main_analysis or "舞蹈" in main_analysis: st.session_state.temp_tag = "舞蹈练习"
-                elif "处事" in main_analysis or "职场" in main_analysis: st.session_state.temp_tag = "为人处事/职场"
-                elif "专业" in main_analysis or "sterility" in main_analysis.lower(): st.session_state.temp_tag = "专业知识"
-                elif "AI" in main_analysis or "编程" in main_analysis: st.session_state.temp_tag = "AI/编程"
-                elif "视频" in main_analysis or "摄影" in main_analysis: st.session_state.temp_tag = "视频/摄影"
-                else: st.session_state.temp_tag = "其他"
+                # 6 大分类智能标记
+                st.session_state.temp_tag = "其他"
+                for tag in ["英语学习", "舞蹈练习", "为人处事/职场", "专业知识", "AI/编程", "视频/摄影"]:
+                    if tag in main_analysis:
+                        st.session_state.temp_tag = tag
+                        break
 
                 # 提取原子任务
                 if action_part:
@@ -99,19 +92,20 @@ if st.button("✨ 启动深度解析"):
 # --- 4. 内化阶段 ---
 if "temp_res" in st.session_state:
     st.divider()
-    st.header("2. 确认并入库", divider="green")
+    st.header("2. 理解与吸收", divider="green")
     
     col1, col2 = st.columns([1, 1.2])
     with col1:
-        st.subheader("🤖 专家深度分析")
-        st.info(f"分类：{st.session_state.temp_tag}")
+        st.subheader("🤖 AI 专家分析 (深度模式)")
+        st.info(f"标签预测：{st.session_state.temp_tag}")
         st.markdown(st.session_state.temp_res)
     
     with col2:
-        st.subheader("✍️ 我的笔记与行动")
-        user_thought = st.text_area("心得总结：", placeholder="用你的话记录这一刻的启发...", height=100)
+        st.subheader("✍️ 我的内化笔记")
+        user_thought = st.text_area("心得总结：", placeholder="作为 PhD/舞蹈老师，你的感悟是？", height=100)
         
-        st.write("🎯 **Action Items (原子拆解，可修改)**")
+        st.write("🎯 **Action Items (AI 自动生成 + 可修改)**")
+        # 🌟 只有这里才是 ADHD 原子拆解 🌟
         edited_df = st.data_editor(
             st.session_state.todo_df,
             num_rows="dynamic",
@@ -119,11 +113,12 @@ if "temp_res" in st.session_state:
             key="action_editor"
         )
         
-        if st.button("💾 永久同步至 Google Sheets"):
+        if st.button("💾 确认入库并同步至 Google Sheets"):
             if user_thought:
                 sheet = connect_to_sheet()
                 if sheet:
                     try:
+                        # 处理任务完成状态（划掉字体）
                         final_actions = []
                         for index, row in edited_df.iterrows():
                             t = row['Task']
@@ -133,6 +128,7 @@ if "temp_res" in st.session_state:
                         
                         action_string = "\n".join(final_actions)
                         
+                        # 写入 5 列：Category, Note, Action Items, Summary, Source
                         sheet.append_row([
                             st.session_state.temp_tag, 
                             user_thought, 
@@ -140,7 +136,7 @@ if "temp_res" in st.session_state:
                             st.session_state.temp_res, 
                             st.session_state.raw_source
                         ])
-                        st.success("✅ 存入成功！记得去 Sheets 划掉已完成项。")
+                        st.success("入库成功！明天记得在'我的知识库'复习。")
                         del st.session_state.temp_res
                         st.rerun()
                     except Exception as e:
@@ -148,9 +144,9 @@ if "temp_res" in st.session_state:
             else:
                 st.warning("心得是内化的第一步，请写下一句感悟。")
 
-# --- 5. 历史 ---
+# --- 5. 库预览 ---
 st.divider()
-if st.checkbox("📚 查看历史成长库"):
+if st.checkbox("📚 查看我的历史成长库"):
     sheet = connect_to_sheet()
     if sheet:
         try:
