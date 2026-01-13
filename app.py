@@ -44,7 +44,7 @@ if st.button("✨ 让 AI 深度解析"):
     else:
         try:
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('models/gemini-1.5-flash') 
+            model = genai.GenerativeModel('models/gemini-2.5-flash') 
             
             prompt = f"""
             你是一个学习专家。请对以下内容：
