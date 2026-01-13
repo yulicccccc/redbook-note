@@ -1,75 +1,100 @@
 import streamlit as st
 import google.generativeai as genai
 
-# 配置页面
+# 页面配置
 st.set_page_config(page_title="知识内化助手", layout="centered")
 
 # 侧边栏：配置 API Key
 with st.sidebar:
     st.title("⚙️ 设置")
-    api_key = "AIzaSyAaA3gvPJMHb_DKk4Dew7Jj9PwrU0hBlcM"
-    st.info("分类：AI应用 | 跳舞 | 职场英语")
+    # 方案：你可以在这里粘贴 Key，或者将下面的字符串换成你的 Key
+    api_key_input = st.text_input("粘贴你的 Gemini API Key", type="password")
+    # 如果你想省事，可以直接写死在这里：
+    # api_key_input = "你的那串AIza代码"
+    st.info("分类标签：AI应用 | 跳舞 | 职场英语")
 
 st.title("🧠 碎片知识内化系统")
-st.caption("把小红书的碎片，通过 AI 提炼和自我总结，变成长期记忆。")
+st.caption("把小红书碎片内容，变成你的长期记忆。")
 
 # 第一阶段：收集
 st.header("1. 录入内容", divider="blue")
 content = st.text_area("请从小红书复制文案粘贴到这里：", height=150, placeholder="粘贴文案...")
 
 if st.button("✨ 让 AI 预总结"):
-    if not api_key:
+    if not api_key_input:
         st.error("请先在左侧输入 API Key！")
     elif not content:
         st.warning("内容不能为空")
     else:
         try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            # 这里的配置和模型选择进行了修复
+            genai.configure(api_key=api_key_input)
+            # 使用最新的模型命名方式
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
             
             prompt = f"""
             你是一个学习专家。请针对以下内容：
-            1. 自动归类（AI应用/跳舞/职场英语/其他）。
-            2. 提炼核心大纲（3-5点）。
-            3. 给出1个实操建议。
+            1. 自动从 [AI应用, 跳舞, 职场英语, 其他] 中选择一个最贴切的分类。
+            2. 提炼核心知识点大纲（3-5点）。
+            3. 给出1个具体的实操建议。
             
             内容如下：
             {content}
             """
             
-            with st.spinner("AI 正在解析..."):
+            with st.spinner("AI 正在解析内容..."):
+                # 显式指定安全设置或保持默认
                 res = model.generate_content(prompt)
                 st.session_state.temp_res = res.text
+                
+                # 简单逻辑判断标签
+                if "AI" in res.text: st.session_state.temp_tag = "AI应用"
+                elif "跳舞" in res.text: st.session_state.temp_tag = "跳舞"
+                elif "英语" in res.text: st.session_state.temp_tag = "职场英语"
+                else: st.session_state.temp_tag = "其他"
+                
         except Exception as e:
-            st.error(f"出错啦: {e}")
+            st.error(f"API调用失败: {str(e)}")
+            st.info("提示：请检查 API Key 是否正确，或尝试更换模型名称为 'gemini-pro'")
 
 # 第二阶段：内化
 if "temp_res" in st.session_state:
     st.divider()
     st.header("2. 理解与吸收", divider="green")
-    st.subheader("🤖 AI 的预整理")
-    st.markdown(st.session_state.temp_res)
     
-    st.subheader("✍️ 我的思考笔记")
-    user_thought = st.text_area("【核心环节】用你自己的话总结一下：", placeholder="写下你对这个知识的理解或应用计划...")
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.subheader("🤖 AI 预整理")
+        st.caption(f"分类：{st.session_state.temp_tag}")
+        st.markdown(st.session_state.temp_res)
     
-    if st.button("💾 确认存入知识库"):
-        if user_thought:
-            if 'db' not in st.session_state: st.session_state.db = []
-            st.session_state.db.append({"note": user_thought, "source": st.session_state.temp_res})
-            st.success("入库成功！多复习才能不忘。")
-            del st.session_state.temp_res
-            st.rerun()
-        else:
-            st.warning("请至少写下一句你的总结。")
+    with col2:
+        st.subheader("✍️ 我的内化笔记")
+        user_thought = st.text_area("【核心环节】用你自己的话总结一下：", 
+                                  placeholder="写下你对这个知识的理解，或者你打算怎么用它...",
+                                  height=250)
+        
+        if st.button("💾 确认入库保存"):
+            if user_thought:
+                if 'db' not in st.session_state: st.session_state.db = []
+                st.session_state.db.append({
+                    "tag": st.session_state.temp_tag,
+                    "note": user_thought,
+                    "source": st.session_state.temp_res
+                })
+                st.success("入库成功！多复习才能不忘。")
+                del st.session_state.temp_res
+                st.rerun()
+            else:
+                st.warning("请写下一句你的总结，哪怕一句话也好。")
 
 # 预览库
 if 'db' in st.session_state and len(st.session_state.db) > 0:
     st.divider()
-    st.write("📚 我的知识库 (预览)：")
+    st.header("📚 我的知识库 (预览)")
     for item in reversed(st.session_state.db):
-        with st.expander(item['note'][:20] + "..."):
+        with st.expander(f"[{item['tag']}] {item['note'][:15]}..."):
             st.write(f"**我的笔记：**\n{item['note']}")
-            st.write("---")
-            st.write("**AI 原始参考：**")
+            st.divider()
+            st.write("**原始 AI 总结：**")
             st.markdown(item['source'])
