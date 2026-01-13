@@ -6,10 +6,11 @@ import json
 # 页面配置
 st.set_page_config(page_title="知识内化助手", layout="centered")
 
-# --- 1. 连接 Google Sheets ---
+# --- 1. 连接 Google Sheets (保留云存储) ---
 @st.cache_resource
 def connect_to_sheet():
     try:
+        # 从 Secrets 读取配置
         json_str = st.secrets["gcp_json"]
         creds_dict = json.loads(json_str)
         gc = gspread.service_account_from_dict(creds_dict)
@@ -22,17 +23,17 @@ def connect_to_sheet():
 with st.sidebar:
     st.title("⚙️ 设置")
     api_key = "AIzaSyAaA3gvPJMHb_DKk4Dew7Jj9PwrU0hBlcM"
-    # 🌟 这里的提示变了
-    st.info("🔥 已启用最强大脑：Gemini 2.5 Pro")
+    # 🌟 这里的状态栏更新了
+    st.info("🚀 已启用：Gemini 3.0 Flash (最新一代)")
 
-st.title("🧠 深度知识内化系统 (Pro版)")
-st.caption("启用深度推理模式，提供流程优化与风控建议")
+st.title("🧠 碎片知识内化系统 (V3版)")
+st.caption("由 Gemini 3.0 驱动 | 专家级风控建议")
 
 # --- 3. 收集阶段 ---
-st.header("1. 深度解析", divider="blue")
-content = st.text_area("请从小红书复制文案（特别是涉及流程/方法的）：", height=150)
+st.header("1. 录入内容", divider="blue")
+content = st.text_area("请从小红书复制文案粘贴到这里：", height=150)
 
-if st.button("✨ 启动深度思考"):
+if st.button("✨ 让 Gemini 3 深度解析"):
     if not api_key:
         st.error("请先输入 API Key！")
     elif not content:
@@ -41,28 +42,36 @@ if st.button("✨ 启动深度思考"):
         try:
             genai.configure(api_key=api_key)
             
-            # 🌟 关键改动 1：换用 Pro 模型，思考更深
-            model = genai.GenerativeModel('models/gemini-2.5-pro')
+            # 🌟 核心修改：切换到你列表里的 Gemini 3 Flash Preview
+            # 这是目前理论上最强且免费的模型
+            model = genai.GenerativeModel('models/gemini-3-flash-preview')
             
-            # 🌟 关键改动 2：Prompt 专门针对你的需求进行了“咨询顾问化”改造
+            # 🌟 灵魂提示词 (Prompt)：
+            # 保留了你最喜欢的 "Checkpoints" 和 "审批点" 逻辑
             prompt = f"""
-            你是一个资深的流程优化专家和技能导师。请深入分析以下内容，不要只做简单的总结。
+            你是一个拥有 20 年经验的资深技能导师和流程优化专家。请深度解析以下内容。
             
-            请按以下结构输出：
-            1. **核心逻辑拆解**：用简练的语言概括内容的核心机制。
-            2. **关键控制点 (Checkpoints)**：(重要) 指出在这个流程或方法中，最容易出错的地方在哪里？应该在哪里设置“检查点”或“确认环节”来确保结果符合预期？
-            3. **实操落地建议**：给出一个具体的、可执行的下一步动作。
-            4. **自动分类**：[AI应用, 跳舞, 职场英语, 其他]
+            请严格按以下结构输出（不要说废话）：
+            
+            1. **自动分类**：从 [AI应用, 跳舞, 职场英语, 其他] 中选一个。
+            
+            2. **核心逻辑拆解**：用结构化列表还原内容骨架。
+            
+            3. **⚡️ 关键控制点 (Critical Checkpoints)**：
+               * (这是最重要的一点) 请指出在这个流程/动作中，**最容易出错的环节**在哪里？
+               * 我们需要在哪里设置一个**“自我检查点”**或**“审批确认点”**，以确保结果不走样？
+            
+            4. **✅ 下一步实操建议**：基于你的专家视角，给出一个马上能做的行动指令。
             
             内容如下：
             {content}
             """
             
-            with st.spinner("Gemini Pro 正在进行逻辑推演与风控分析..."):
+            with st.spinner("Gemini 3 正在进行深度推理..."):
                 response = model.generate_content(prompt)
                 st.session_state.temp_res = response.text
                 
-                # 分类标记
+                # 智能分类逻辑
                 if "AI" in response.text: st.session_state.temp_tag = "AI应用"
                 elif "跳舞" in response.text: st.session_state.temp_tag = "跳舞"
                 elif "英语" in response.text: st.session_state.temp_tag = "职场英语"
@@ -70,7 +79,7 @@ if st.button("✨ 启动深度思考"):
 
         except Exception as e:
             st.error(f"调用失败: {e}")
-            st.info("如果 Pro 模型报错，请尝试改回 'models/gemini-2.5-flash'")
+            st.info("如果 Gemini 3 也不稳定，请把代码里的模型名改回 'models/gemini-2.5-flash'")
 
 # --- 4. 内化阶段 ---
 if "temp_res" in st.session_state:
@@ -81,7 +90,7 @@ if "temp_res" in st.session_state:
     st.markdown(st.session_state.temp_res)
     
     user_thought = st.text_area("✍️ 我的内化笔记：", 
-                              placeholder="针对 AI 提出的 Checkpoint，你打算怎么优化你的习惯？",
+                              placeholder="针对 AI 提出的'关键控制点'，你打算怎么调整你的习惯？",
                               height=200)
     
     if st.button("💾 永久存入 Google Sheets"):
@@ -89,18 +98,19 @@ if "temp_res" in st.session_state:
             sheet = connect_to_sheet()
             if sheet:
                 try:
+                    # 存入表格
                     sheet.append_row([st.session_state.temp_tag, user_thought, st.session_state.temp_res])
-                    st.success("✅ 深度笔记已保存！")
+                    st.success("✅ 笔记已飞入云端表格！")
                     del st.session_state.temp_res
                     st.rerun()
                 except Exception as e:
                     st.error(f"写入失败: {e}")
             else:
-                st.error("表格连接失败")
+                st.error("表格连接失败，请检查 Secrets 配置。")
         else:
-            st.warning("写点心得吧，深度思考的结果值得记录。")
+            st.warning("写点心得吧，哪怕只有一句。")
 
-# --- 5. 历史 ---
+# --- 5. 历史回顾 ---
 st.divider()
 if st.checkbox("📚 查看历史笔记"):
     sheet = connect_to_sheet()
@@ -109,5 +119,7 @@ if st.checkbox("📚 查看历史笔记"):
             data = sheet.get_all_records()
             if data:
                 st.dataframe(data)
+            else:
+                st.info("暂无数据")
         except:
             st.write("暂无数据")
