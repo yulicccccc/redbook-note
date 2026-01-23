@@ -37,7 +37,6 @@ with st.sidebar:
         if sheet:
             df = pd.DataFrame(sheet.get_all_records())
             if not df.empty:
-                # 简单拼接最近的内容供 NotebookLM 使用
                 text = "# 本周知识汇总\n\n" + df.tail(15).to_string()
                 st.code(text, language="markdown")
                 st.caption("👆 全选复制 -> 喂给 NotebookLM App")
@@ -50,14 +49,9 @@ if not api_key:
     st.warning("👈 请先在侧边栏输入 API Key")
     st.stop()
 
+# 🌟 修复核心：改回最标准的模型名称 🌟
 genai.configure(api_key=api_key)
-
-# 🌟 修正点：使用更稳定的具体版本名称，防止找不到模型 🌟
-try:
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
-except:
-    # 如果 latest 不行，回退到标准名
-    model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # --- 4. 聊天展示区 ---
 for message in st.session_state.messages:
