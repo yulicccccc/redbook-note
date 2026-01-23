@@ -1,4 +1,5 @@
 import streamlit as st
+import google.generativeai as genai
 import gspread
 import json
 import pandas as pd
@@ -7,104 +8,185 @@ from datetime import datetime
 # 页面配置 (手机优化)
 st.set_page_config(page_title="Kira的大脑外挂", layout="centered", page_icon="🧠")
 
-# --- 1. 连接 Google Sheets (只用于存，不消耗 API) ---
+# --- 1. 初始化 ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "chat_active" not in st.session_state:
+    st.session_state.chat_active = False
+
 @st.cache_resource
 def connect_to_sheet():
     try:
         if "gcp_json" in st.secrets:
-            json_str = st.secrets["gcp_json"]
-            creds_dict = json.loads(json_str)
-            gc = gspread.service_account_from_dict(creds_dict)
-            sh = gc.open("My_Knowledge_Base")
-            return sh.sheet1
+            creds = json.loads(st.secrets["gcp_json"])
+            gc = gspread.service_account_from_dict(creds)
+            return gc.open("My_Knowledge_Base").sheet1
         return None
-    except Exception as e:
+    except:
         return None
 
-# 主标题
-st.title("🧠 Kira's Prompt Launcher")
-st.caption("指令生成器 | 免 API | 无限深聊")
-
-# --- 2. 录入素材 ---
-st.header("1. 喂入素材", divider="rainbow")
-st.info("💡 如果是图片，请直接去 Gemini 网页版上传，这里只生成指令。")
-content_text = st.text_area("📝 粘贴链接/文字：", height=100, placeholder="把想学的东西贴这里...")
-
-# --- 3. 生成完美指令 (Prompt Engine) ---
-# 这里锁死你最爱的逻辑：前三点专家深度，第四点 ADHD 原子化
-expert_prompt = f"""
-请你扮演我的高级知识伙伴。我是一名 PhD 背景的 Project Microbiologist，同时也是 ADHD。
-请对以下内容（或我上传的图片）进行解析，严格遵守以下结构：
-
-【第一部分：深度卡片】(专家视角，保持 PhD 级的深度逻辑)
-1. **自动分类**：必须从 [跳舞, 创意摄像, 英语, AI应用, 人情世故, 学习与个人成长, 其他灵感] 中选一个。
-2. **核心逻辑**：用 3 个 bullet points 提炼最有价值的信息（分析底层逻辑、构图或动作细节）。
-3. **专家建议**：请基于你（知识专家）的角色，给出一个深度的、优化长远思维的洞察建议。
-
-【第二部分：极简行动】(ADHD 教练视角)
-请针对执行障碍，生成 **最多 3 个** 原子级 Action Items。
-规则：
-1. 极其简单（1分钟能开始）。
-2. 必须具体（例如：“存下这张图到‘构图’相册”）。
-格式：使用 `- [ ]` 列表。
-
-【第三部分：深聊引导】
-请在最后问我一个引导性问题，帮助我继续深入思考这个话题。
-
----
-**我的素材内容如下：**
-{content_text}
-"""
-
-if content_text:
+# --- 2. 侧边栏 ---
+with st.sidebar:
+    st.title("⚙️ 设置")
+    api_key = st.text_input("Gemini API Key", type="password")
+    
     st.divider()
-    st.header("2. 发射到 Gemini", divider="violet")
-    
-    # 1. 显示指令
-    st.caption("👇 全选复制下面的指令框")
-    st.code(expert_prompt, language="markdown")
-    
-    # 2. 跳转按钮
-    st.link_button("🚀 打开 Gemini 网页版 (粘贴并深聊)", "https://gemini.google.com/", use_container_width=True, type="primary")
-
-# --- 4. (可选) 聊完回来存档 ---
-st.divider()
-with st.expander("📥 聊完了？把精华存进仓库 (点击展开)"):
-    st.caption("把 Gemini 的精彩回答贴回来，永久保存到 Google Sheets。")
-    
-    manual_tag = st.selectbox("分类:", ["跳舞", "创意摄像", "英语", "AI应用", "人情世故", "学习与个人成长", "其他灵感"])
-    manual_note = st.text_area("我的心得/Gemini的回答:", height=150)
-    
-    if st.button("💾 存入表格", use_container_width=True):
+    st.header("📚 复习区")
+    if st.button("生成本周复习文本"):
         sheet = connect_to_sheet()
         if sheet:
-            try:
-                date_str = datetime.now().strftime("%Y-%m-%d")
-                # 存入结构: Date, Category, Note, (空Action), (空Analysis), Source
-                sheet.append_row([
-                    date_str,
-                    manual_tag, 
-                    manual_note, 
-                    "手动存档", 
-                    "详见 Gemini 聊天记录", 
-                    content_text
-                ])
-                st.success("🎉 已存档！")
-            except Exception as e:
-                st.error(f"存储失败: {e}")
+            df = pd.DataFrame(sheet.get_all_records())
+            if not df.empty:
+                # 简单拼接最近的内容供 NotebookLM 使用
+                text = "# 本周知识汇总\n\n" + df.tail(15).to_string()
+                st.code(text, language="markdown")
+                st.caption("👆 全选复制 -> 喂给 NotebookLM App")
 
-# --- 5. 复习区 (Mobile 优化) ---
-st.divider()
-st.header("📚 NotebookLM 投喂区")
-sheet = connect_to_sheet()
-if sheet:
-    # 简单读取，不消耗 API
-    if st.button("生成本周复习文本 (Copy Block)"):
-        data = sheet.get_all_records()
-        df = pd.DataFrame(data)
-        if not df.empty:
-            text_data = "# 本周知识汇总\n\n"
-            for index, row in df.iterrows():
-                text_data += str(row.to_dict()) + "\n---\n"
-            st.code(text_data, language="markdown")
-            st.caption("👆 全选复制 -> 喂给 NotebookLM")
+# --- 3. 主界面 ---
+st.title("🧠 Kira's Brain Extension")
+st.caption("一站式深聊 | 智能总结入库")
+
+if not api_key:
+    st.warning("👈 请先在侧边栏输入 API Key (使用 1.5 Flash)")
+    st.stop()
+
+genai.configure(api_key=api_key)
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+# --- 4. 聊天展示区 ---
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# --- 5. 聊天输入区 ---
+# 第一轮：启动对话 (带 Prompt)
+if not st.session_state.chat_active:
+    uploaded_file = st.file_uploader("📸 上传图片 (可选)", type=["jpg", "png", "webp"])
+    user_input = st.chat_input("在此粘贴小红书链接/文案...")
+
+    if user_input or uploaded_file:
+        st.session_state.chat_active = True
+        
+        # 显示用户输入
+        display_text = user_input if user_input else "[图片上传]"
+        if uploaded_file: display_text += " 📷"
+        
+        with st.chat_message("user"):
+            if uploaded_file: st.image(uploaded_file, width=200)
+            st.markdown(user_input if user_input else "")
+        
+        st.session_state.messages.append({"role": "user", "content": display_text})
+
+        # 准备发送给 AI 的内容
+        content_parts = []
+        if user_input: content_parts.append(user_input)
+        if uploaded_file:
+            from PIL import Image
+            img = Image.open(uploaded_file)
+            content_parts.append(img)
+
+        # 核心 System Prompt
+        system_prompt = """
+        你是一个懂 ADHD 的高级知识伙伴。请对输入内容解析：
+        【Part 1: 深度卡片】(专家视角，保持 PhD 级的深度)
+        1. **自动分类**：从 [跳舞, 创意摄像, 英语, AI应用, 人情世故, 学习与个人成长, 其他灵感] 选一。
+        2. **核心逻辑**：3 个 bullet points 提炼最有价值信息。
+        3. **专家建议**：深度、长远视角的洞察。
+        【Part 2: 极简行动】(ADHD 教练视角)
+        生成 **最多 3 个** 原子级 Action Items (1分钟能开始)。
+        格式：使用 `- [ ]` 列表。
+        """
+        content_parts.append(system_prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("🧠 深度分析中..."):
+                try:
+                    response = model.generate_content(content_parts)
+                    st.markdown(response.text)
+                    st.session_state.messages.append({"role": "assistant", "content": response.text})
+                except Exception as e:
+                    st.error(f"出错: {e}")
+
+# 后续轮次：自由深聊
+else:
+    if user_input := st.chat_input("继续追问 (例如：给个例子 / 这一步怎么做？)"):
+        with st.chat_message("user"):
+            st.markdown(user_input)
+        st.session_state.messages.append({"role": "user", "content": user_input})
+
+        # 构建历史上下文
+        chat_history = []
+        for msg in st.session_state.messages:
+            role = "user" if msg["role"] == "user" else "model"
+            # 简单处理：只发文本，避免图片在多轮对话中出错
+            if "📷" not in msg["content"]: 
+                chat_history.append({"role": role, "parts": [msg["content"]]})
+        
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    chat = model.start_chat(history=chat_history[:-1])
+                    response = chat.send_message(user_input)
+                    st.markdown(response.text)
+                    st.session_state.messages.append({"role": "assistant", "content": response.text})
+                except Exception as e:
+                    st.error(f"出错: {e}")
+
+# --- 6. 一键总结与存档区 (The Magic Button) ---
+if st.session_state.chat_active and len(st.session_state.messages) > 1:
+    st.divider()
+    st.info("聊完了？点击下方按钮，AI 会自动帮你把刚才的所有对话精华提取出来存入表格。")
+    
+    if st.button("✨ 一键总结并入库 (Auto-Save)", type="primary", use_container_width=True):
+        sheet = connect_to_sheet()
+        if sheet:
+            with st.spinner("正在回顾刚才的聊天记录并提取精华..."):
+                try:
+                    # 1. 把整个对话记录打包发给 AI 做总结
+                    full_conversation = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
+                    
+                    summary_prompt = f"""
+                    请回顾以下对话记录，帮我提取关键信息以便存档到 Google Sheets。
+                    对话记录：
+                    {full_conversation}
+                    
+                    请严格按照以下格式输出 4 行内容（不要加其他废话）：
+                    Line 1: [最终分类] (从跳舞, 创意摄像, 英语, AI应用, 人情世故, 学习与个人成长, 其他灵感 中选一个)
+                    Line 2: [核心心得] (一句话总结这次对话对用户的最大启发)
+                    Line 3: [最终行动] (最终确定的 Action Items，用逗号分隔)
+                    Line 4: [深度摘要] (对整个对话的知识点摘要，200字以内)
+                    """
+                    
+                    summary_res = model.generate_content(summary_prompt).text
+                    
+                    # 2. 解析 AI 的输出
+                    lines = summary_res.strip().split('\n')
+                    # 简单容错处理
+                    category = lines[0].split(':')[-1].strip() if len(lines) > 0 else "未分类"
+                    note = lines[1].split(':')[-1].strip() if len(lines) > 1 else "无"
+                    actions = lines[2].split(':')[-1].strip() if len(lines) > 2 else "无"
+                    analysis = lines[3].split(':')[-1].strip() if len(lines) > 3 else "见详情"
+                    
+                    # 3. 存入表格
+                    # 结构: Date, Category, User Note, Action Items, AI Analysis, Source
+                    date_str = datetime.now().strftime("%Y-%m-%d")
+                    original_source = st.session_state.messages[0]['content'] # 第一条是素材
+                    
+                    sheet.append_row([
+                        date_str,
+                        category,
+                        note,      # 核心心得
+                        actions,   # 最终行动
+                        analysis,  # 深度摘要
+                        original_source
+                    ])
+                    
+                    st.success("🎉 存档成功！对话已浓缩入库。")
+                    # 可选：清空对话准备下一轮
+                    if st.button("开启新话题"):
+                        st.session_state.messages = []
+                        st.session_state.chat_active = False
+                        st.rerun()
+                        
+                except Exception as e:
+                    st.error(f"总结或存档失败: {e}")
