@@ -15,8 +15,6 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "analysis_result" not in st.session_state:
     st.session_state.analysis_result = None
-if "raw_content" not in st.session_state:
-    st.session_state.raw_content = ""
 
 # --- 3. 连接 Google Sheets ---
 @st.cache_resource
@@ -30,10 +28,23 @@ def connect_to_sheet():
     except:
         return None
 
-# --- 4. 侧边栏 ---
+# --- 4. 侧边栏 (新增模型切换功能) ---
 with st.sidebar:
     st.title("⚙️ 设置")
     api_key = st.text_input("Gemini API Key", type="password")
+    
+    st.divider()
+    st.markdown("### 🤖 模型选择")
+    st.caption("如果你遇到红色报错，请尝试切换下面的模型：")
+    
+    # 🌟 这里的列表来自你刚才的截图，都是你账号里有的！
+    # 默认选第一个 Lite 版，最不容易限流
+    model_options = [
+        "gemini-2.0-flash-lite-preview-02-05",  # 推荐：极速、稳
+        "gemini-2.5-flash",                     # 尝鲜：最新版
+        "gemini-2.0-flash",                     # 旗舰：容易限流
+    ]
+    selected_model = st.selectbox("当前使用模型：", model_options)
     
     st.divider()
     if st.button("📚 生成本周复习文本"):
@@ -46,18 +57,14 @@ with st.sidebar:
 
 # --- 5. 主程序 ---
 st.title("🧠 Kira's Brain Extension")
-st.caption("🚀 适配版 | 使用 Gemini 2.0 Flash")
+st.caption(f"🚀 当前引擎: {selected_model}")
 
 if not api_key:
     st.warning("👈 请先输入 API Key")
     st.stop()
 
 genai.configure(api_key=api_key)
-
-# 🌟 关键修改：根据你的诊断列表，使用存在的 'gemini-2.0-flash' 🌟
-# 如果 2.0 遇到限流，代码会自动提示
-target_model_name = 'gemini-2.0-flash' 
-model = genai.GenerativeModel(target_model_name)
+model = genai.GenerativeModel(selected_model)
 
 # ==========================================
 # 核心功能区
@@ -71,7 +78,8 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
     if not content_text and not uploaded_file:
         st.warning("请提供内容！")
     else:
-        with st.spinner(f"🧠 正在调用 {target_model_name} ..."):
+        # 显示正在调用的模型，让你心里有数
+        with st.spinner(f"🧠 正在呼叫 {selected_model} ..."):
             try:
                 # 1. 准备输入
                 inputs = []
@@ -129,12 +137,12 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
                 st.session_state.messages.append({"role": "assistant", "content": full_res})
 
             except Exception as e:
-                # 错误处理
                 err_msg = str(e)
                 if "429" in err_msg:
-                    st.error(f"❌ 速度太快被限流了！Gemini 2.0 比较抢手。请等 1 分钟再试。")
+                    st.error(f"❌ {selected_model} 太火爆被限流了！")
+                    st.info("💡 请在左侧侧边栏切换为 'gemini-2.0-flash-lite' 或其他模型再试！")
                 elif "404" in err_msg:
-                    st.error(f"❌ 找不到模型 {target_model_name}。请检查 API Key 权限。")
+                    st.error(f"❌ 找不到模型 {selected_model}。请切换其他模型。")
                 else:
                     st.error(f"解析失败: {e}")
 
@@ -187,13 +195,9 @@ if st.session_state.analysis_result:
             with st.chat_message("user"): st.markdown(chat_input)
             st.session_state.messages.append({"role": "user", "content": chat_input})
             
-            # 使用同样的 2.0 Flash 进行对话
-            model = genai.GenerativeModel(target_model_name)
-            
-            # 简单处理历史（只传文本）
-            history_text = []
-            for m in st.session_state.messages:
-                 history_text.append({"role": "user" if m["role"]=="user" else "model", "parts": [str(m["content"])]})
+            # 使用当前选中的模型进行对话
+            model = genai.GenerativeModel(selected_model)
+            history_text = [{"role": "user" if m["role"]=="user" else "model", "parts": [str(m["content"])]} for m in st.session_state.messages]
 
             with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
