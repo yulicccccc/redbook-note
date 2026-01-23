@@ -44,14 +44,20 @@ with st.sidebar:
 
 # --- 3. 主界面 ---
 st.title("🧠 Kira's Brain Extension")
-st.caption("一站式深聊 | 智能总结入库")
+st.caption("一站式深聊 | 智能总结入库 | 1.5 Flash")
 
 if not api_key:
-    st.warning("👈 请先在侧边栏输入 API Key (使用 1.5 Flash)")
+    st.warning("👈 请先在侧边栏输入 API Key")
     st.stop()
 
 genai.configure(api_key=api_key)
-model = genai.GenerativeModel('gemini-1.5-flash')
+
+# 🌟 修正点：使用更稳定的具体版本名称，防止找不到模型 🌟
+try:
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+except:
+    # 如果 latest 不行，回退到标准名
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
 # --- 4. 聊天展示区 ---
 for message in st.session_state.messages:
@@ -118,7 +124,6 @@ else:
         chat_history = []
         for msg in st.session_state.messages:
             role = "user" if msg["role"] == "user" else "model"
-            # 简单处理：只发文本，避免图片在多轮对话中出错
             if "📷" not in msg["content"]: 
                 chat_history.append({"role": role, "parts": [msg["content"]]})
         
@@ -132,7 +137,7 @@ else:
                 except Exception as e:
                     st.error(f"出错: {e}")
 
-# --- 6. 一键总结与存档区 (The Magic Button) ---
+# --- 6. 一键总结与存档区 ---
 if st.session_state.chat_active and len(st.session_state.messages) > 1:
     st.divider()
     st.info("聊完了？点击下方按钮，AI 会自动帮你把刚才的所有对话精华提取出来存入表格。")
@@ -142,7 +147,7 @@ if st.session_state.chat_active and len(st.session_state.messages) > 1:
         if sheet:
             with st.spinner("正在回顾刚才的聊天记录并提取精华..."):
                 try:
-                    # 1. 把整个对话记录打包发给 AI 做总结
+                    # 1. 总结
                     full_conversation = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
                     
                     summary_prompt = f"""
@@ -150,39 +155,31 @@ if st.session_state.chat_active and len(st.session_state.messages) > 1:
                     对话记录：
                     {full_conversation}
                     
-                    请严格按照以下格式输出 4 行内容（不要加其他废话）：
+                    请严格按照以下格式输出 4 行内容：
                     Line 1: [最终分类] (从跳舞, 创意摄像, 英语, AI应用, 人情世故, 学习与个人成长, 其他灵感 中选一个)
-                    Line 2: [核心心得] (一句话总结这次对话对用户的最大启发)
-                    Line 3: [最终行动] (最终确定的 Action Items，用逗号分隔)
-                    Line 4: [深度摘要] (对整个对话的知识点摘要，200字以内)
+                    Line 2: [核心心得] (一句话总结)
+                    Line 3: [最终行动] (Action Items，逗号分隔)
+                    Line 4: [深度摘要] (200字以内)
                     """
                     
                     summary_res = model.generate_content(summary_prompt).text
                     
-                    # 2. 解析 AI 的输出
+                    # 2. 解析
                     lines = summary_res.strip().split('\n')
-                    # 简单容错处理
                     category = lines[0].split(':')[-1].strip() if len(lines) > 0 else "未分类"
                     note = lines[1].split(':')[-1].strip() if len(lines) > 1 else "无"
                     actions = lines[2].split(':')[-1].strip() if len(lines) > 2 else "无"
                     analysis = lines[3].split(':')[-1].strip() if len(lines) > 3 else "见详情"
                     
-                    # 3. 存入表格
-                    # 结构: Date, Category, User Note, Action Items, AI Analysis, Source
+                    # 3. 存入
                     date_str = datetime.now().strftime("%Y-%m-%d")
-                    original_source = st.session_state.messages[0]['content'] # 第一条是素材
+                    original_source = st.session_state.messages[0]['content'] 
                     
                     sheet.append_row([
-                        date_str,
-                        category,
-                        note,      # 核心心得
-                        actions,   # 最终行动
-                        analysis,  # 深度摘要
-                        original_source
+                        date_str, category, note, actions, analysis, original_source
                     ])
                     
-                    st.success("🎉 存档成功！对话已浓缩入库。")
-                    # 可选：清空对话准备下一轮
+                    st.success("🎉 存档成功！")
                     if st.button("开启新话题"):
                         st.session_state.messages = []
                         st.session_state.chat_active = False
