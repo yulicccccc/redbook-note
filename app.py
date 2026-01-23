@@ -15,6 +15,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "analysis_result" not in st.session_state:
     st.session_state.analysis_result = None
+if "raw_content" not in st.session_state:
+    st.session_state.raw_content = ""
 
 # --- 3. 连接 Google Sheets ---
 @st.cache_resource
@@ -34,7 +36,6 @@ with st.sidebar:
     api_key = st.text_input("Gemini API Key", type="password")
     
     st.divider()
-    # 简单的复习文本生成
     if st.button("📚 生成本周复习文本"):
         sheet = connect_to_sheet()
         if sheet:
@@ -45,13 +46,18 @@ with st.sidebar:
 
 # --- 5. 主程序 ---
 st.title("🧠 Kira's Brain Extension")
-st.caption("V10.0 自检版 | 1.5 Flash 优先")
+st.caption("🚀 适配版 | 使用 Gemini 2.0 Flash")
 
 if not api_key:
     st.warning("👈 请先输入 API Key")
     st.stop()
 
 genai.configure(api_key=api_key)
+
+# 🌟 关键修改：根据你的诊断列表，使用存在的 'gemini-2.0-flash' 🌟
+# 如果 2.0 遇到限流，代码会自动提示
+target_model_name = 'gemini-2.0-flash' 
+model = genai.GenerativeModel(target_model_name)
 
 # ==========================================
 # 核心功能区
@@ -65,8 +71,7 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
     if not content_text and not uploaded_file:
         st.warning("请提供内容！")
     else:
-        status_box = st.empty()
-        with status_box.status("🧠 正在连接大脑...", expanded=True) as s:
+        with st.spinner(f"🧠 正在调用 {target_model_name} ..."):
             try:
                 # 1. 准备输入
                 inputs = []
@@ -84,7 +89,7 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
                 你是一个懂 ADHD 的高级知识伙伴。请对输入内容解析：
                 【Part 1: 深度卡片】(专家视角，保持 PhD 级的深度)
                 1. **自动分类**：必须从 [跳舞, 创意摄像, 英语, AI应用, 人情世故, 学习与个人成长, 其他灵感] 选一。
-                2. **核心逻辑**：3 个 bullet points 提炼最有价值信息。
+                2. **核心逻辑**：3 个 bullet points 提炼最有价值信息（如果是图，分析构图/色彩/动作）。
                 3. **专家建议**：深度、长远视角的洞察。
 
                 【Part 2: 极简行动】(ADHD 教练视角)
@@ -93,26 +98,24 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
                 """
                 inputs.append(prompt)
 
-                # 3. 尝试调用 1.5 Flash (因为你的环境已经是新的了，理论上应该用这个)
-                s.write("正在尝试连接 gemini-1.5-flash ...")
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                # 3. 调用 API
                 response = model.generate_content(inputs)
-                
-                s.update(label="✅ 分析成功！", state="complete", expanded=False)
                 full_res = response.text
-
-                # --- 成功后的处理逻辑 ---
+                
+                # 4. 解析结果
                 main_analysis = full_res.split("---ACTION_START---")[0].strip()
                 action_part = re.search(r"---ACTION_START---(.*)---ACTION_END---", full_res, re.DOTALL)
                 
                 st.session_state.analysis_result = main_analysis
                 
+                # 提取分类
                 st.session_state.temp_tag = "其他灵感"
                 for tag in ["跳舞", "创意摄像", "英语", "AI应用", "人情世故", "学习与个人成长"]:
                     if tag in main_analysis:
                         st.session_state.temp_tag = tag
                         break
 
+                # 提取任务
                 if action_part:
                     tasks = [t.strip() for t in action_part.group(1).strip().split('\n') if t.strip()]
                     clean_tasks = [re.sub(r'^\d+\.\s*', '', t).replace('- [ ]', '').strip() for t in tasks]
@@ -120,32 +123,20 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
                 else:
                     st.session_state.todo_df = pd.DataFrame([{"Done": False, "Task": "阅后即焚"}])
                 
+                # 初始化聊天
                 st.session_state.messages = []
                 st.session_state.messages.append({"role": "user", "content": f"素材：{display_content}"})
                 st.session_state.messages.append({"role": "assistant", "content": full_res})
 
             except Exception as e:
-                s.update(label="❌ 出错啦", state="error", expanded=True)
-                st.error(f"主要模型调用失败: {e}")
-                
-                # ==============================
-                # 🕵️‍♀️ 自动侦探模式：查询可用模型
-                # ==============================
-                st.divider()
-                st.warning("正在诊断你的 API Key 支持哪些模型...")
-                try:
-                    available_models = []
-                    for m in genai.list_models():
-                        if 'generateContent' in m.supported_generation_methods:
-                            available_models.append(m.name)
-                    
-                    if available_models:
-                        st.success(f"✅ 你的 Key 可以访问这些模型: {available_models}")
-                        st.info("请把上面那个列表截图发给 AI，我们就能立刻知道该用哪个名字了！")
-                    else:
-                        st.error("❌ 你的 API Key 似乎无法访问任何内容生成模型。请检查 Key 是否有效，或是否开通了权限。")
-                except Exception as debug_e:
-                    st.error(f"诊断也失败了 (可能是网络或Key的问题): {debug_e}")
+                # 错误处理
+                err_msg = str(e)
+                if "429" in err_msg:
+                    st.error(f"❌ 速度太快被限流了！Gemini 2.0 比较抢手。请等 1 分钟再试。")
+                elif "404" in err_msg:
+                    st.error(f"❌ 找不到模型 {target_model_name}。请检查 API Key 权限。")
+                else:
+                    st.error(f"解析失败: {e}")
 
 # ==========================================
 # 结果与存档
@@ -187,7 +178,7 @@ if st.session_state.analysis_result:
     # 聊天挂件
     # ==========================================
     st.divider()
-    with st.expander("💬 追问 (纯文本)", expanded=False):
+    with st.expander("💬 追问", expanded=False):
         for i, msg in enumerate(st.session_state.messages):
             if i > 0:
                 with st.chat_message(msg["role"]): st.markdown(msg["content"])
@@ -196,9 +187,13 @@ if st.session_state.analysis_result:
             with st.chat_message("user"): st.markdown(chat_input)
             st.session_state.messages.append({"role": "user", "content": chat_input})
             
-            # 使用 1.5 Flash 进行对话
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            history_text = [{"role": "user" if m["role"]=="user" else "model", "parts": [str(m["content"])]} for m in st.session_state.messages]
+            # 使用同样的 2.0 Flash 进行对话
+            model = genai.GenerativeModel(target_model_name)
+            
+            # 简单处理历史（只传文本）
+            history_text = []
+            for m in st.session_state.messages:
+                 history_text.append({"role": "user" if m["role"]=="user" else "model", "parts": [str(m["content"])]})
 
             with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
