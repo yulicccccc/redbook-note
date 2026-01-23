@@ -7,10 +7,10 @@ import re
 from datetime import datetime
 from PIL import Image
 
-# --- 1. 页面配置 (必须放在第一行) ---
+# --- 1. 页面配置 ---
 st.set_page_config(page_title="Kira的大脑外挂", layout="centered", page_icon="🧠")
 
-# --- 2. 初始化 Session State ---
+# --- 2. 初始化 ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "analysis_result" not in st.session_state:
@@ -30,83 +30,97 @@ def connect_to_sheet():
     except:
         return None
 
-# --- 4. 侧边栏设置 ---
+# --- 4. 侧边栏 ---
 with st.sidebar:
     st.title("⚙️ 设置")
     api_key = st.text_input("Gemini API Key", type="password")
-    
     st.divider()
     if st.button("📚 生成本周复习文本"):
         sheet = connect_to_sheet()
         if sheet:
             df = pd.DataFrame(sheet.get_all_records())
             if not df.empty:
-                # 简单防错
                 text = "# 本周知识汇总\n\n" + df.tail(15).to_string()
                 st.code(text, language="markdown")
-                st.caption("👆 全选复制 -> 喂给 NotebookLM")
 
-# --- 5. 主程序逻辑 ---
+# --- 5. 主程序 ---
 st.title("🧠 Kira's Brain Extension")
-st.caption("Flash 1.5 模型 | 深度分析 + 原子行动")
+st.caption("兼容模式 | 自动切换 Pro/Vision")
 
 if not api_key:
-    st.warning("👈 请先在侧边栏输入 API Key")
+    st.warning("👈 请先输入 API Key")
     st.stop()
 
-# 配置模型
 genai.configure(api_key=api_key)
-# 🌟 这里锁定使用 1.5 Flash，如果报错 catch 住给提示 🌟
-model = genai.GenerativeModel('gemini-1.5-flash')
 
 # ==========================================
-# 上半场：核心功能 (分析+清单)
+# 🧠 核心：智能兼容函数 (解决 404 的关键)
+# ==========================================
+def get_safe_response(prompt_text, image_obj=None):
+    """
+    既然 Flash 用不了，我们就用老模型。
+    有图 -> gemini-pro-vision
+    无图 -> gemini-pro
+    """
+    try:
+        if image_obj:
+            # === 视觉模式 ===
+            model = genai.GenerativeModel('gemini-pro-vision')
+            # 老版视觉模型要求 List 格式: [Prompt, Image]
+            response = model.generate_content([prompt_text, image_obj])
+        else:
+            # === 纯文字模式 ===
+            model = genai.GenerativeModel('gemini-pro')
+            response = model.generate_content(prompt_text)
+        return response.text
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+# ==========================================
+# 上半场：分析区
 # ==========================================
 st.header("1. 喂入素材", divider="rainbow")
 
-# 输入区
 content_text = st.text_area("📝 粘贴内容：", height=100)
-uploaded_file = st.file_uploader("📸 上传截图 (支持)", type=["jpg", "png", "webp"])
+uploaded_file = st.file_uploader("📸 上传截图", type=["jpg", "png", "webp"])
 
-# 启动按钮
 if st.button("✨ 启动大脑解析", type="primary", use_container_width=True):
     if not content_text and not uploaded_file:
-        st.warning("请至少提供文字或图片！")
+        st.warning("给点东西分析呗！")
     else:
-        with st.spinner("🧠 正在连接 Gemini 1.5 Flash..."):
-            try:
-                # 1. 准备输入数据
-                inputs = []
-                display_content = ""
-                if content_text: 
-                    inputs.append(content_text)
-                    display_content += content_text
-                if uploaded_file:
-                    img = Image.open(uploaded_file)
-                    inputs.append(img)
-                    display_content += " [包含图片]"
-                
-                st.session_state.raw_content = display_content
+        with st.spinner("🧠 正在调用兼容模型引擎..."):
+            # 准备数据
+            img = None
+            display_content = content_text if content_text else ""
+            if uploaded_file:
+                img = Image.open(uploaded_file)
+                display_content += " [图片]"
+            
+            st.session_state.raw_content = display_content
 
-                # 2. 核心 Prompt
-                prompt = """
-                你是一个懂 ADHD 的高级知识伙伴。请对输入内容解析：
-                【Part 1: 深度卡片】(专家视角，保持 PhD 级的深度)
-                1. **自动分类**：必须从 [跳舞, 创意摄像, 英语, AI应用, 人情世故, 学习与个人成长, 其他灵感] 选一。
-                2. **核心逻辑**：3 个 bullet points 提炼最有价值信息（如果是图，分析构图/色彩/细节）。
-                3. **专家建议**：基于你的专家身份，给出一个深度的、长远视角的洞察。
+            # Prompt
+            base_prompt = """
+            你是一个懂 ADHD 的高级知识伙伴。请对输入内容解析：
+            【Part 1: 深度卡片】(专家视角，保持 PhD 级的深度)
+            1. **自动分类**：必须从 [跳舞, 创意摄像, 英语, AI应用, 人情世故, 学习与个人成长, 其他灵感] 选一。
+            2. **核心逻辑**：3 个 bullet points 提炼最有价值信息。
+            3. **专家建议**：深度、长远视角的洞察。
 
-                【Part 2: 极简行动】(ADHD 教练视角)
-                生成 **最多 3 个** 原子级 Action Items (1分钟能开始)。
-                格式：请严格把任务放在 ---ACTION_START--- 和 ---ACTION_END--- 之间，每行一个。
-                """
-                inputs.append(prompt)
+            【Part 2: 极简行动】(ADHD 教练视角)
+            生成 **最多 3 个** 原子级 Action Items (1分钟能开始)。
+            格式：请严格把任务放在 ---ACTION_START--- 和 ---ACTION_END--- 之间，每行一个。
+            
+            内容如下：
+            """
+            
+            # 调用兼容函数
+            full_res = get_safe_response(base_prompt + "\n" + content_text, img)
 
-                # 3. 调用 API
-                response = model.generate_content(inputs)
-                full_res = response.text
-                
-                # 4. 解析结果
+            # 错误处理
+            if "Error:" in full_res:
+                st.error("出错啦：" + full_res)
+            else:
+                # 解析成功
                 main_analysis = full_res.split("---ACTION_START---")[0].strip()
                 action_part = re.search(r"---ACTION_START---(.*)---ACTION_END---", full_res, re.DOTALL)
                 
@@ -119,7 +133,7 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
                         st.session_state.temp_tag = tag
                         break
 
-                # 提取清单
+                # 提取任务
                 if action_part:
                     tasks = [t.strip() for t in action_part.group(1).strip().split('\n') if t.strip()]
                     clean_tasks = [re.sub(r'^\d+\.\s*', '', t).replace('- [ ]', '').strip() for t in tasks]
@@ -127,23 +141,13 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
                 else:
                     st.session_state.todo_df = pd.DataFrame([{"Done": False, "Task": "阅后即焚"}])
                 
-                # 初始化聊天记录 (为深聊做准备)
+                # 初始化聊天 (只存文本，因为老版 Pro 不支持多轮图片历史)
                 st.session_state.messages = []
                 st.session_state.messages.append({"role": "user", "content": f"素材：{display_content}"})
                 st.session_state.messages.append({"role": "assistant", "content": full_res})
 
-            except Exception as e:
-                # 🌟 专门捕获 404 错误，给出人话提示 🌟
-                error_msg = str(e)
-                if "404" in error_msg and "models/" in error_msg:
-                    st.error("❌ 环境版本过低，无法识别 1.5 Flash 模型！")
-                    st.warning("请务必在 GitHub 仓库添加 requirements.txt 文件，并重启 App。")
-                    st.code("google-generativeai>=0.7.2", language="text")
-                else:
-                    st.error(f"解析失败: {e}")
-
 # ==========================================
-# 结果展示区
+# 结果与存档
 # ==========================================
 if st.session_state.analysis_result:
     st.divider()
@@ -157,8 +161,7 @@ if st.session_state.analysis_result:
     
     user_thought = st.text_area("💭 此时的想法:", height=80)
     
-    # 存档按钮
-    if st.button("💾 存入知识库 (完成)", type="primary", use_container_width=True):
+    if st.button("💾 存入知识库", type="primary", use_container_width=True):
         sheet = connect_to_sheet()
         if sheet:
             try:
@@ -180,30 +183,30 @@ if st.session_state.analysis_result:
                 st.error(f"写入失败: {e}")
 
     # ==========================================
-    # 下半场：深聊挂件 (V5功能)
+    # 下半场：聊天挂件 (强制文本模式)
     # ==========================================
     st.divider()
-    with st.expander("💬 没看懂？想深挖？点这里展开聊天 (可选)", expanded=False):
-        # 显示历史
+    with st.expander("💬 追问 (纯文本模式)", expanded=False):
         for i, msg in enumerate(st.session_state.messages):
-            if i > 1: # 跳过初始的 Context
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
+            if i > 0: # 稍微隐藏下复杂的初始Prompt
+                with st.chat_message(msg["role"]): st.markdown(msg["content"])
         
         if chat_input := st.chat_input("追问..."):
             with st.chat_message("user"): st.markdown(chat_input)
             st.session_state.messages.append({"role": "user", "content": chat_input})
             
-            # 构建纯文本历史 (避免老版本库对多轮图片处理的兼容性问题)
-            history_text = []
+            # 使用老版 Pro 进行对话 (不带图)
+            model = genai.GenerativeModel('gemini-pro')
+            
+            # 拼接历史文本 (老版SDK最稳妥做法)
+            full_context = ""
             for m in st.session_state.messages:
-                 history_text.append({"role": "user" if m["role"]=="user" else "model", "parts": [str(m["content"])]})
-
+                full_context += f"{m['role']}: {m['content']}\n"
+            
             with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
                     try:
-                        chat = model.start_chat(history=history_text[:-1])
-                        response = chat.send_message(chat_input)
+                        response = model.generate_content(full_context)
                         st.markdown(response.text)
                         st.session_state.messages.append({"role": "assistant", "content": response.text})
                     except Exception as e:
