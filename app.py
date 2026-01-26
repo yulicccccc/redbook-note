@@ -16,7 +16,7 @@ if "messages" not in st.session_state:
 if "analysis_result" not in st.session_state:
     st.session_state.analysis_result = None
 
-# --- 3. 连接 Google Sheets ---
+# --- 3. 连接 Google Sheets (带状态反馈) ---
 @st.cache_resource
 def connect_to_sheet():
     try:
@@ -25,39 +25,44 @@ def connect_to_sheet():
             gc = gspread.service_account_from_dict(creds)
             return gc.open("My_Knowledge_Base").sheet1
         return None
-    except:
+    except Exception as e:
         return None
 
-# --- 4. 侧边栏 (新增模型切换功能) ---
+# --- 4. 侧边栏 ---
 with st.sidebar:
     st.title("⚙️ 设置")
+    
+    # 🌟 新增：连接状态检查
+    sheet_check = connect_to_sheet()
+    if sheet_check:
+        st.success("✅ 知识库连接正常")
+        # 直接提供跳转链接
+        st.link_button("📂 打开我的 Google Sheets", "https://docs.google.com/spreadsheets/u/0/")
+    else:
+        st.error("❌ 知识库断连 (检查 Secrets)")
+
     api_key = st.text_input("Gemini API Key", type="password")
     
     st.divider()
-    st.markdown("### 🤖 模型选择")
-    st.caption("如果你遇到红色报错，请尝试切换下面的模型：")
-    
-    # 🌟 这里的列表来自你刚才的截图，都是你账号里有的！
-    # 默认选第一个 Lite 版，最不容易限流
+    st.markdown("### 🤖 模型切换")
     model_options = [
-        "gemini-2.0-flash-lite-preview-02-05",  # 推荐：极速、稳
-        "gemini-2.5-flash",                     # 尝鲜：最新版
-        "gemini-2.0-flash",                     # 旗舰：容易限流
+        "gemini-2.0-flash-lite-preview-02-05",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
     ]
-    selected_model = st.selectbox("当前使用模型：", model_options)
-    
+    selected_model = st.selectbox("当前模型：", model_options)
+
     st.divider()
-    if st.button("📚 生成本周复习文本"):
-        sheet = connect_to_sheet()
-        if sheet:
-            df = pd.DataFrame(sheet.get_all_records())
+    if st.button("📚 生成复习文本"):
+        if sheet_check:
+            df = pd.DataFrame(sheet_check.get_all_records())
             if not df.empty:
                 text = "# 本周知识汇总\n\n" + df.tail(15).to_string()
                 st.code(text, language="markdown")
 
 # --- 5. 主程序 ---
 st.title("🧠 Kira's Brain Extension")
-st.caption(f"🚀 当前引擎: {selected_model}")
+st.caption(f"🚀 引擎: {selected_model}")
 
 if not api_key:
     st.warning("👈 请先输入 API Key")
@@ -78,10 +83,8 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
     if not content_text and not uploaded_file:
         st.warning("请提供内容！")
     else:
-        # 显示正在调用的模型，让你心里有数
-        with st.spinner(f"🧠 正在呼叫 {selected_model} ..."):
+        with st.spinner(f"🧠 {selected_model} 正在思考..."):
             try:
-                # 1. 准备输入
                 inputs = []
                 display_content = content_text if content_text else ""
                 if content_text: inputs.append(content_text)
@@ -92,12 +95,11 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
                 
                 st.session_state.raw_content = display_content
 
-                # 2. 核心 Prompt
                 prompt = """
                 你是一个懂 ADHD 的高级知识伙伴。请对输入内容解析：
                 【Part 1: 深度卡片】(专家视角，保持 PhD 级的深度)
                 1. **自动分类**：必须从 [跳舞, 创意摄像, 英语, AI应用, 人情世故, 学习与个人成长, 其他灵感] 选一。
-                2. **核心逻辑**：3 个 bullet points 提炼最有价值信息（如果是图，分析构图/色彩/动作）。
+                2. **核心逻辑**：3 个 bullet points 提炼最有价值信息。
                 3. **专家建议**：深度、长远视角的洞察。
 
                 【Part 2: 极简行动】(ADHD 教练视角)
@@ -106,24 +108,20 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
                 """
                 inputs.append(prompt)
 
-                # 3. 调用 API
                 response = model.generate_content(inputs)
                 full_res = response.text
                 
-                # 4. 解析结果
                 main_analysis = full_res.split("---ACTION_START---")[0].strip()
                 action_part = re.search(r"---ACTION_START---(.*)---ACTION_END---", full_res, re.DOTALL)
                 
                 st.session_state.analysis_result = main_analysis
                 
-                # 提取分类
                 st.session_state.temp_tag = "其他灵感"
                 for tag in ["跳舞", "创意摄像", "英语", "AI应用", "人情世故", "学习与个人成长"]:
                     if tag in main_analysis:
                         st.session_state.temp_tag = tag
                         break
 
-                # 提取任务
                 if action_part:
                     tasks = [t.strip() for t in action_part.group(1).strip().split('\n') if t.strip()]
                     clean_tasks = [re.sub(r'^\d+\.\s*', '', t).replace('- [ ]', '').strip() for t in tasks]
@@ -131,7 +129,6 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
                 else:
                     st.session_state.todo_df = pd.DataFrame([{"Done": False, "Task": "阅后即焚"}])
                 
-                # 初始化聊天
                 st.session_state.messages = []
                 st.session_state.messages.append({"role": "user", "content": f"素材：{display_content}"})
                 st.session_state.messages.append({"role": "assistant", "content": full_res})
@@ -139,15 +136,14 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
             except Exception as e:
                 err_msg = str(e)
                 if "429" in err_msg:
-                    st.error(f"❌ {selected_model} 太火爆被限流了！")
-                    st.info("💡 请在左侧侧边栏切换为 'gemini-2.0-flash-lite' 或其他模型再试！")
+                    st.error(f"❌ 限流了！请在左侧切换模型。")
                 elif "404" in err_msg:
-                    st.error(f"❌ 找不到模型 {selected_model}。请切换其他模型。")
+                    st.error(f"❌ 模型找不到。请在左侧切换模型。")
                 else:
                     st.error(f"解析失败: {e}")
 
 # ==========================================
-# 结果与存档
+# 结果与存档 (V13 安全感增强版)
 # ==========================================
 if st.session_state.analysis_result:
     st.divider()
@@ -161,6 +157,7 @@ if st.session_state.analysis_result:
     
     user_thought = st.text_area("💭 此时的想法:", height=80)
     
+    # 🌟 改进后的保存按钮
     if st.button("💾 存入知识库", type="primary", use_container_width=True):
         sheet = connect_to_sheet()
         if sheet:
@@ -178,9 +175,19 @@ if st.session_state.analysis_result:
                     action_str, st.session_state.analysis_result, 
                     st.session_state.get("raw_content", "")
                 ])
-                st.success("🎉 已存入！")
+                
+                # 🎉 成功特效：放气球
+                st.balloons()
+                st.success("🎉 已成功写入！")
+                
+                # 🔗 查岗链接
+                st.markdown("👇 **不放心？点下面链接去表格里亲眼看看：**")
+                st.link_button("👀 前往 Google Sheets 查岗", "https://docs.google.com/spreadsheets/u/0/")
+                
             except Exception as e:
                 st.error(f"写入失败: {e}")
+        else:
+            st.error("❌ 无法连接到表格，请检查 Secrets 配置！")
 
     # ==========================================
     # 聊天挂件
@@ -195,7 +202,6 @@ if st.session_state.analysis_result:
             with st.chat_message("user"): st.markdown(chat_input)
             st.session_state.messages.append({"role": "user", "content": chat_input})
             
-            # 使用当前选中的模型进行对话
             model = genai.GenerativeModel(selected_model)
             history_text = [{"role": "user" if m["role"]=="user" else "model", "parts": [str(m["content"])]} for m in st.session_state.messages]
 
