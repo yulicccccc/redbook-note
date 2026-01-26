@@ -16,35 +16,51 @@ if "messages" not in st.session_state:
 if "analysis_result" not in st.session_state:
     st.session_state.analysis_result = None
 
-# --- 3. 连接 Google Sheets (带状态反馈) ---
+# --- 3. 连接 Google Sheets (V14.0 诊断版) ---
 @st.cache_resource
 def connect_to_sheet():
+    # 1. 检查 Secrets 格式
+    if "gcp_json" not in st.secrets:
+        return None, "❌ 错误：Secrets 里找不到 'gcp_json'。请检查是否漏了 gcp_json = \"\"\" 这行头。"
+
     try:
-        if "gcp_json" in st.secrets:
-            creds = json.loads(st.secrets["gcp_json"])
-            gc = gspread.service_account_from_dict(creds)
-            return gc.open("My_Knowledge_Base").sheet1
-        return None
+        # 2. 读取密钥
+        secret_val = st.secrets["gcp_json"]
+        if isinstance(secret_val, str):
+            creds = json.loads(secret_val)
+        else:
+            creds = dict(secret_val) # 兼容某些自动转换情况
+            
+        # 3. 尝试连接
+        gc = gspread.service_account_from_dict(creds)
+        # ⚠️ 注意：这里必须是你表格的真实名称，不能错一个字
+        sh = gc.open("My_Knowledge_Base").sheet1 
+        return sh, "Success"
+        
+    except json.JSONDecodeError:
+        return None, "❌ 错误：JSON 格式不对。请确保你完整复制了 key.json 的内容，没有少括号。"
+    except gspread.SpreadsheetNotFound:
+        return None, "❌ 错误：找不到表格。请确保你的 Google Sheet 名字叫 'My_Knowledge_Base'，并且已经把 Service Account 邮箱加为 Editor。"
     except Exception as e:
-        return None
+        return None, f"❌ 其他错误: {str(e)}"
 
 # --- 4. 侧边栏 ---
 with st.sidebar:
     st.title("⚙️ 设置")
     
-    # 🌟 新增：连接状态检查
-    sheet_check = connect_to_sheet()
-    if sheet_check:
-        st.success("✅ 知识库连接正常")
-        # 直接提供跳转链接
-        st.link_button("📂 打开我的 Google Sheets", "https://docs.google.com/spreadsheets/u/0/")
+    # 🌟 实时连接诊断
+    sheet, status_msg = connect_to_sheet()
+    
+    if sheet:
+        st.success("✅ 知识库连接成功！")
+        st.link_button("📂 打开表格", "https://docs.google.com/spreadsheets/u/0/")
     else:
-        st.error("❌ 知识库断连 (检查 Secrets)")
+        st.error("⚠️ 连接断开")
+        st.info(f"诊断信息：\n{status_msg}")
 
     api_key = st.text_input("Gemini API Key", type="password")
     
     st.divider()
-    st.markdown("### 🤖 模型切换")
     model_options = [
         "gemini-2.0-flash-lite-preview-02-05",
         "gemini-2.5-flash",
@@ -54,8 +70,8 @@ with st.sidebar:
 
     st.divider()
     if st.button("📚 生成复习文本"):
-        if sheet_check:
-            df = pd.DataFrame(sheet_check.get_all_records())
+        if sheet:
+            df = pd.DataFrame(sheet.get_all_records())
             if not df.empty:
                 text = "# 本周知识汇总\n\n" + df.tail(15).to_string()
                 st.code(text, language="markdown")
@@ -115,7 +131,6 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
                 action_part = re.search(r"---ACTION_START---(.*)---ACTION_END---", full_res, re.DOTALL)
                 
                 st.session_state.analysis_result = main_analysis
-                
                 st.session_state.temp_tag = "其他灵感"
                 for tag in ["跳舞", "创意摄像", "英语", "AI应用", "人情世故", "学习与个人成长"]:
                     if tag in main_analysis:
@@ -134,16 +149,10 @@ if st.button("✨ 启动大脑解析", type="primary", use_container_width=True)
                 st.session_state.messages.append({"role": "assistant", "content": full_res})
 
             except Exception as e:
-                err_msg = str(e)
-                if "429" in err_msg:
-                    st.error(f"❌ 限流了！请在左侧切换模型。")
-                elif "404" in err_msg:
-                    st.error(f"❌ 模型找不到。请在左侧切换模型。")
-                else:
-                    st.error(f"解析失败: {e}")
+                st.error(f"解析出错: {e}")
 
 # ==========================================
-# 结果与存档 (V13 安全感增强版)
+# 结果与存档
 # ==========================================
 if st.session_state.analysis_result:
     st.divider()
@@ -157,9 +166,7 @@ if st.session_state.analysis_result:
     
     user_thought = st.text_area("💭 此时的想法:", height=80)
     
-    # 🌟 改进后的保存按钮
     if st.button("💾 存入知识库", type="primary", use_container_width=True):
-        sheet = connect_to_sheet()
         if sheet:
             try:
                 final_actions = []
@@ -170,28 +177,25 @@ if st.session_state.analysis_result:
                 action_str = "\n".join(final_actions)
                 date_str = datetime.now().strftime("%Y-%m-%d")
                 
+                # V14 写入逻辑：适配你的 6 列表格
                 sheet.append_row([
-                    date_str, st.session_state.temp_tag, user_thought, 
-                    action_str, st.session_state.analysis_result, 
+                    date_str, 
+                    st.session_state.temp_tag, 
+                    user_thought, 
+                    action_str, 
+                    st.session_state.analysis_result, 
                     st.session_state.get("raw_content", "")
                 ])
                 
-                # 🎉 成功特效：放气球
                 st.balloons()
-                st.success("🎉 已成功写入！")
-                
-                # 🔗 查岗链接
-                st.markdown("👇 **不放心？点下面链接去表格里亲眼看看：**")
-                st.link_button("👀 前往 Google Sheets 查岗", "https://docs.google.com/spreadsheets/u/0/")
+                st.success("🎉 写入成功！")
+                st.link_button("👀 去表格查岗", "https://docs.google.com/spreadsheets/u/0/")
                 
             except Exception as e:
                 st.error(f"写入失败: {e}")
         else:
-            st.error("❌ 无法连接到表格，请检查 Secrets 配置！")
+            st.error("❌ 无法连接。请看侧边栏的诊断信息！")
 
-    # ==========================================
-    # 聊天挂件
-    # ==========================================
     st.divider()
     with st.expander("💬 追问", expanded=False):
         for i, msg in enumerate(st.session_state.messages):
