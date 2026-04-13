@@ -58,7 +58,7 @@ with st.sidebar:
         st.error("⚠️ 连接断开")
         st.info(f"诊断信息：\n{status_msg}")
 
-    api_key = st.secrets["AIzaSyA87FUSPf6cUIQKPhvu25dCmNVcn4md8L8"]
+    api_key = st.secrets["gemini_key"]
     
     st.divider()
     # 🌟 修复点：移除了导致 404 的废弃模型，并将最稳定的 2.5-flash 放首位
