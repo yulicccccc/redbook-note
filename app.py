@@ -61,9 +61,10 @@ with st.sidebar:
     api_key = st.text_input("Gemini API Key", type="password")
     
     st.divider()
+    # 🌟 修复点：移除了导致 404 的废弃模型，并将最稳定的 2.5-flash 放首位
     model_options = [
-        "gemini-2.0-flash-lite-preview-02-05",
         "gemini-2.5-flash",
+        "gemini-3-flash-preview", # 加入了你权限列表中最先进的模型
         "gemini-2.0-flash",
     ]
     selected_model = st.selectbox("当前模型：", model_options)
